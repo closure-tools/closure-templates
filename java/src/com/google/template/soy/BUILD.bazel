@@ -1,3 +1,4 @@
+load("@rules_java//java:defs.bzl", "java_binary")
 load("@xyz_yannic_rules_javacc//javacc:defs.bzl", "javacc_java_library")
 
 # TODO(yannic): Split into smaller libraries.
@@ -7,6 +8,7 @@ javacc_java_library(
         "**/*.java",
         "**/*.jj",
     ]),
+    visibility = ["//visibility:public"],
     deps = [
         "//java/src/com/google/template/soy/base",
         "//java/src/com/google/template/soy/base/internal",
@@ -40,5 +42,59 @@ javacc_java_library(
         "@org_ow2_asm_commons//jar",
         "@org_ow2_asm_tree//jar",
         "@org_ow2_asm_util//jar",
+    ],
+)
+
+java_binary(
+    name = "SoyHeaderCompiler",
+    main_class = "com.google.template.soy.SoyHeaderCompiler",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        ":soy",
+    ],
+)
+
+java_binary(
+    name = "SoyMsgExtractor",
+    main_class = "com.google.template.soy.SoyMsgExtractor",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        ":soy",
+    ],
+)
+
+java_binary(
+    name = "SoyParseInfoGenerator",
+    main_class = "com.google.template.soy.SoyParseInfoGenerator",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        ":soy",
+    ],
+)
+
+java_binary(
+    name = "SoyToJbcSrcCompiler",
+    main_class = "com.google.template.soy.SoyToJbcSrcCompiler",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        ":soy",
+    ],
+)
+
+java_binary(
+    name = "SoyToJsSrcCompiler",
+    main_class = "com.google.template.soy.SoyToJsSrcCompiler",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        ":soy",
+    ],
+)
+
+java_binary(
+    name = "SoyToPySrcCompiler",
+    main_class = "com.google.template.soy.SoyToPySrcCompiler",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        ":soy",
     ],
 )
