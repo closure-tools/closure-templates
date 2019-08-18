@@ -294,6 +294,13 @@ public final class GenerateParseInfoVisitor
     }
   }
 
+  private String getJavaPackage(SoyFileNode node) {
+    if (!javaPackage.isEmpty()) {
+      return javaPackage;
+    }
+    return node.getNamespace();
+  }
+
   @Override
   protected void visitSoyFileNode(SoyFileNode node) {
     String javaClassName = soyFileToJavaClassNameMap.get(node);
@@ -399,7 +406,7 @@ public final class GenerateParseInfoVisitor
     ilb.appendLine("// source: ", node.getFilePath());
 
     ilb.appendLine();
-    ilb.appendLine("package ", javaPackage, ";");
+    ilb.appendLine("package ", getJavaPackage(node), ";");
     ilb.appendLine();
     ilb.appendLine("import com.google.common.collect.ImmutableList;");
     ilb.appendLine("import com.google.common.collect.ImmutableMap;");

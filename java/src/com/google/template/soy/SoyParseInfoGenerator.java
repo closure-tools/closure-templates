@@ -53,7 +53,7 @@ public final class SoyParseInfoGenerator extends AbstractSoyCompiler {
     usage =
         "[Optional] The path to the output directory. If files with the same names"
             + " already exist at this location, they will be overwritten. "
-            + "Either --outputDirectory or --outputJar must be set"
+            + "Either --outputDirectory or --outputJar must be set."
   )
   private String outputDirectory = "";
 
@@ -62,16 +62,26 @@ public final class SoyParseInfoGenerator extends AbstractSoyCompiler {
     usage =
         "[Optional] The path to the source jar to write. If a file with the same name"
             + " already exist at this location, it will be overwritten. "
-            + "Either --outputDirectory or --outputJar must be set"
+            + "Either --outputDirectory or --outputJar must be set."
   )
   private File outputSrcJar;
 
   @Option(
     name = "--javaPackage",
-    required = true,
-    usage = "[Required] The Java package name to use for the generated classes."
+    usage =
+        "[Optional] The Java package name to use for the generated classes. "
+            + "Either --javaPackage or --useSoyNamespaceAsJavaPackage must be set."
   )
   private String javaPackage = "";
+
+  @Option(
+    name = "--useSoyNamespaceAsJavaPackage",
+    usage =
+        "[Optional] Whether to use the soy namespace as Java package name for the generated "
+            + "classes. Only supported if --outputSrcJar is set."
+            + "Either --javaPackage or --useSoyNamespaceAsJavaPackage must be set."
+  )
+  private boolean useSoyNamespaceAsJavaPackage = false;
 
   @Option(
     name = "--javaClassNameSource",
@@ -110,8 +120,12 @@ public final class SoyParseInfoGenerator extends AbstractSoyCompiler {
     if (outputDirectory.isEmpty() == (outputSrcJar == null)) {
       exitWithError("Must provide exactly one of --outputDirectory or --outputSrcJar");
     }
-    if (javaPackage.length() == 0) {
-      exitWithError("Must provide Java package.");
+    if ((javaPackage.isEmpty() && !useSoyNamespaceAsJavaPackage) ||
+        (useSoyNamespaceAsJavaPackage && !javaPackage.isEmpty())) {
+      exitWithError("Must provide exactly one of --javaPackage or --useSoyNamespaceAsJavaPackage.");
+    }
+    if (useSoyNamespaceAsJavaPackage && (outputSrcJar == null)) {
+      exitWithError("--useSoyNamespaceAsJavaPackage must be used together with --outputSrcJar");
     }
     if (javaClassNameSource.length() == 0) {
       exitWithError("Must provide Java class name source.");
@@ -133,6 +147,7 @@ public final class SoyParseInfoGenerator extends AbstractSoyCompiler {
         Files.asCharSink(outputFile, UTF_8).write(entry.getValue());
       }
     } else {
+      // TODO(yannic): Generate sources in correct location.
       String resourcePath = javaPackage.replace('.', '/') + "/";
       try (SoyJarFileWriter writer = new SoyJarFileWriter(new FileOutputStream(outputSrcJar))) {
         for (Map.Entry<String, String> entry : parseInfo.entrySet()) {
