@@ -1,0 +1,36 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "proto",
+    srcs = [
+        "Field.java",
+        "FieldVisitor.java",
+        "JavaQualifiedNames.java",
+        "ProtoFlavor.java",
+        "ProtoUtils.java",
+    ],
+    visibility = [
+        "//java/src/com/google/template/soy:__pkg__",
+    ],
+    deps = [
+        "@com_google_guava//guava",
+        "@args4j//jar",
+        "@com_google_auto_value//jar",
+        "@com_google_code_findbugs_jsr305//jar",
+        "@com_google_code_gson//jar",
+        "@com_google_common_html_types//jar",
+        "@com_google_errorprone_error_prone_annotations",
+        "@com_google_inject_extensions_guice_assistedinject//jar",
+        "@com_google_inject_extensions_guice_multibindings//jar",
+        "@com_google_inject_guice//jar",
+        "@com_google_protobuf//:protobuf_java",
+        "@com_ibm_icu_icu4j//jar",
+        "@javax_inject//jar",
+        "@org_apache_ant//jar",
+        "@org_json//jar",
+        "@org_ow2_asm//jar",
+        "@org_ow2_asm_analysis//jar",
+        "@org_ow2_asm_commons//jar",
+        "@org_ow2_asm_util//jar",
+    ],
+)

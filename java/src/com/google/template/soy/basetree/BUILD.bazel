@@ -1,0 +1,22 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "basetree",
+    srcs = [
+        "AbstractNode.java",
+        "AbstractNodeVisitor.java",
+        "AbstractReturningNodeVisitor.java",
+        "CopyState.java",
+        "MixinParentNode.java",
+        "Node.java",
+        "NodeVisitor.java",
+        "ParentNode.java",
+    ],
+    visibility = [
+        "//java/src/com/google/template/soy:__pkg__",
+    ],
+    deps = [
+        "//java/src/com/google/template/soy/base",
+        "@com_google_guava//guava",
+    ],
+)

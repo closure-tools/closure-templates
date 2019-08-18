@@ -1,0 +1,14 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "targetexpr",
+    srcs = [
+        "TargetExpr.java",
+    ],
+    visibility = [
+        "//java/src/com/google/template/soy:__pkg__",
+    ],
+    deps = [
+        "@error_prone_annotations//jar",
+    ],
+)
