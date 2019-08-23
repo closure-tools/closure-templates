@@ -85,10 +85,10 @@ public final class InternalPluginsTest {
         nonStreamingPrintDirectives.add(directive.getName());
       }
     }
+    nonStreamingPrintDirectives.addAll(InternalPlugins.internalAliasedDirectivesMap().keySet());
     assertThat(streamingPrintDirectives.build())
         .containsExactly(
             "|escapeHtml",
-            "|blessStringAsTrustedResourceUrlForLegacy",
             "|escapeCssString",
             "|normalizeHtml",
             "|escapeJsString",

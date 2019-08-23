@@ -77,18 +77,37 @@ public final class PassManager {
   }
 
   @VisibleForTesting final ImmutableList<CompilerFilePass> singleFilePasses;
+  @VisibleForTesting final ImmutableList<CompilerFileSetPass> templateReturnTypeInferencePasses;
   @VisibleForTesting final ImmutableList<CompilerFileSetPass> crossTemplateCheckingPasses;
 
   private PassManager(
       ImmutableList<CompilerFilePass> singleFilePasses,
+      ImmutableList<CompilerFileSetPass> templateReturnTypeInferencePasses,
       ImmutableList<CompilerFileSetPass> crossTemplateCheckingPasses) {
     this.singleFilePasses = singleFilePasses;
+    this.templateReturnTypeInferencePasses = templateReturnTypeInferencePasses;
     this.crossTemplateCheckingPasses = crossTemplateCheckingPasses;
   }
 
   public void runSingleFilePasses(SoyFileNode file, IdGenerator nodeIdGen) {
     for (CompilerFilePass pass : singleFilePasses) {
       pass.run(file, nodeIdGen);
+    }
+  }
+
+  /**
+   * Runs fileset passes that only require partial template registries that only contain
+   * dependencies.
+   */
+  public void runTemplateReturnTypeInferencePasses(
+      SoyFileSetNode soyTree, TemplateRegistry templateRegistry) {
+    ImmutableList<SoyFileNode> sourceFiles = ImmutableList.copyOf(soyTree.getChildren());
+    IdGenerator idGenerator = soyTree.getNodeIdGenerator();
+    for (CompilerFileSetPass pass : templateReturnTypeInferencePasses) {
+      CompilerFileSetPass.Result result = pass.run(sourceFiles, idGenerator, templateRegistry);
+      if (result == CompilerFileSetPass.Result.STOP) {
+        break;
+      }
     }
   }
 
@@ -116,6 +135,7 @@ public final class PassManager {
     private SoyGeneralOptions options;
     private boolean allowUnknownGlobals;
     private boolean allowV1Expression;
+    private boolean allowUnknownJsGlobals;
     private boolean disableAllTypeChecking;
     private boolean desugarHtmlAndStateNodes = true;
     private boolean optimize = true;
@@ -182,6 +202,16 @@ public final class PassManager {
      */
     public Builder allowV1Expression() {
       this.allowV1Expression = true;
+      return this;
+    }
+
+    /**
+     * Allows the unknownJsGlobal() function to be used.
+     *
+     * <p>This option is only available for backwards compatibility with legacy JS only templates.
+     */
+    public Builder allowUnknownJsGlobals() {
+      this.allowUnknownJsGlobals = true;
       return this;
     }
 
@@ -268,19 +298,21 @@ public final class PassManager {
               options.getExperimentalFeatures().contains("skipNode"), errorReporter),
           singleFilePassesBuilder);
       addPass(new BasicHtmlValidationPass(errorReporter), singleFilePassesBuilder);
-      // needs to come before SoyConformancePass
-      addPass(new ResolvePluginsPass(pluginResolver, registry), singleFilePassesBuilder);
-      // The check conformance pass needs to run on the rewritten html nodes, so it must
-      // run after HtmlRewritePass
-      addPass(new SoyConformancePass(conformanceConfig, errorReporter), singleFilePassesBuilder);
       // Needs to run after HtmlRewritePass since it produces the HtmlTagNodes that we use
       // to create placeholders.
       addPass(new InsertMsgPlaceholderNodesPass(errorReporter), singleFilePassesBuilder);
+      // needs to come before SoyConformancePass
+      addPass(
+          new ResolvePluginsPass(pluginResolver, registry, errorReporter), singleFilePassesBuilder);
+      // Must come after ResolvePluginsPass.
       addPass(new RewriteRemaindersPass(errorReporter), singleFilePassesBuilder);
       addPass(new RewriteGenderMsgsPass(errorReporter), singleFilePassesBuilder);
       // Needs to come after any pass that manipulates msg placeholders.
       addPass(new CalculateMsgSubstitutionInfoPass(errorReporter), singleFilePassesBuilder);
       addPass(new CheckNonEmptyMsgNodesPass(errorReporter), singleFilePassesBuilder);
+      // The check conformance pass needs to run on the rewritten html nodes, so it must
+      // run after HtmlRewritePass
+      addPass(new SoyConformancePass(conformanceConfig, errorReporter), singleFilePassesBuilder);
       // Run before the RewriteGlobalsPass as it removes some globals.
       addPass(new VeRewritePass(), singleFilePassesBuilder);
       addPass(
@@ -290,6 +322,8 @@ public final class PassManager {
       addPass(new XidPass(errorReporter), singleFilePassesBuilder);
       // Needs to be before ResolveNamesPass.
       addPass(new V1ExpressionPass(allowV1Expression, errorReporter), singleFilePassesBuilder);
+      addPass(
+          new UnknownJsGlobalPass(allowUnknownJsGlobals, errorReporter), singleFilePassesBuilder);
       addPass(new ResolveNamesPass(errorReporter), singleFilePassesBuilder);
       // needs to be after ResolveNames and MsgsPass
       addPass(new MsgWithIdFunctionPass(errorReporter), singleFilePassesBuilder);
@@ -297,9 +331,6 @@ public final class PassManager {
       addPass(new CheckEscapingSanityFilePass(errorReporter), singleFilePassesBuilder);
       // The StrictHtmlValidatorPass needs to run after ResolveNames.
       addPass(new StrictHtmlValidationPass(errorReporter), singleFilePassesBuilder);
-      // Needs to run after HtmlRewritePass and StrictHtmlValidationPass (for single root
-      // validation).
-      addPass(new SoyElementPass(errorReporter), singleFilePassesBuilder);
       if (addHtmlAttributesForDebugging) {
         // needs to run after MsgsPass (so we don't mess up the auto placeholder naming algorithm)
         // and before ResolveExpressionTypesPass (since we insert expressions).
@@ -326,6 +357,17 @@ public final class PassManager {
           singleFilePassesBuilder);
       // Needs to run after HtmlRewritePass.
       addPass(new KeyCommandPass(errorReporter, disableAllTypeChecking), singleFilePassesBuilder);
+
+      // Fileset passes run on all sources files and have access to a partial template registry so
+      // they can examine information about dependencies.
+      // In contrast to the set of passes below, the results of these passes can be cached in the
+      // AST cache.
+      ImmutableList.Builder<CompilerFileSetPass> templateReturnTypeInferencePasses =
+          ImmutableList.builder();
+
+      // Needs to run after HtmlRewritePass and StrictHtmlValidationPass (for single root
+      // validation).
+      addPass(new SoyElementPass(errorReporter), templateReturnTypeInferencePasses);
 
       // Cross template checking passes
 
@@ -382,7 +424,9 @@ public final class PassManager {
             "The following continuation rules don't match any pass: " + passContinuationRegistry);
       }
       return new PassManager(
-          singleFilePassesBuilder.build(), crossTemplateCheckingPassesBuilder.build());
+          singleFilePassesBuilder.build(),
+          templateReturnTypeInferencePasses.build(),
+          crossTemplateCheckingPassesBuilder.build());
     }
 
     <T extends CompilerPass> void addPass(T pass, ImmutableList.Builder<T> builder) {

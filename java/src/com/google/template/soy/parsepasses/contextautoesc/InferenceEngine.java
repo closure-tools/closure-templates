@@ -44,6 +44,7 @@ import com.google.template.soy.soytree.IfElseNode;
 import com.google.template.soy.soytree.IfNode;
 import com.google.template.soy.soytree.LetContentNode;
 import com.google.template.soy.soytree.MsgFallbackGroupNode;
+import com.google.template.soy.soytree.MsgNode;
 import com.google.template.soy.soytree.PrintNode;
 import com.google.template.soy.soytree.RawTextNode;
 import com.google.template.soy.soytree.SoyNode;
@@ -216,6 +217,12 @@ final class InferenceEngine {
     }
 
     @Override
+    protected void visitMsgNode(MsgNode node) {
+      node.setEscapingMode(context.state.getEscapingMode());
+      super.visitMsgNode(node);
+    }
+
+    @Override
     protected void visitMsgFallbackGroupNode(MsgFallbackGroupNode node) {
       checkUriEnd();
 
@@ -280,8 +287,6 @@ final class InferenceEngine {
     }
 
     private void visitRenderUnitNode(RenderUnitNode node) {
-      // TODO(b/80336719): Change the parser (or the RenderUnitNode constructor) to require a kind.
-      // The CheckEscapingSanityVisitor ensures that node.getContentKind is non-null
       inferInStrictMode(node);
     }
 

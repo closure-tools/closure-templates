@@ -16,10 +16,12 @@
 
 package com.google.template.soy.tofu;
 
+import com.google.common.annotations.Beta;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.template.soy.data.SanitizedContent;
 import com.google.template.soy.data.SoyRecord;
+import com.google.template.soy.data.TemplateParameters;
 import com.google.template.soy.msgs.SoyMsgBundle;
 import com.google.template.soy.parseinfo.SoyTemplateInfo;
 import com.google.template.soy.shared.SoyCssRenamingMap;
@@ -51,6 +53,15 @@ public interface SoyTofu {
    * @return The namespace of this SoyTofu object, or null if no namespace.
    */
   String getNamespace();
+
+  /**
+   * Queries the current SoyTofu instance to see if it holds a given template. If the requested
+   * template is found, `true` is returned, otherwise, `false`.
+   *
+   * @param namespace Namespace to check for a template.
+   * @return Whether the template exists or not.
+   */
+  Boolean hasTemplate(String namespace);
 
   /**
    * Gets a new SoyTofu instance with a different namespace (or no namespace). Note: The new SoyTofu
@@ -87,6 +98,15 @@ public interface SoyTofu {
    * @return A new renderer for the given template.
    */
   Renderer newRenderer(String templateName);
+
+  /**
+   * Returns a new {@link Renderer} for configuring and rendering the given template. The returned
+   * renderer will have its data set and may not allow additional calls to {@link Renderer#setData}.
+   */
+  @Beta
+  default Renderer newRenderer(TemplateParameters params) {
+    return newRenderer(params.getTemplateName()).setData(params.getParamsAsMap());
+  }
 
   /**
    * Gets the set of injected param keys used by a template (and its transitive callees).
@@ -168,13 +188,14 @@ public interface SoyTofu {
     /**
      * Sets the expected content kind.
      *
-     * <p>An attempt to render a template with a different kind will fail if this has been called.
+     * <p>An attempt to render a template with a different kind will fail if this has
+     * been called.
      *
-     * @deprecated Use type-specific render methods instead of setting content kind before rendering
-     *     (e.g. {@link #renderHtml()}, {@link #renderCss()}, etc.).
+     * @deprecated Use type-specific render methods instead of setting content kind
+     *     before rendering (e.g. {@link #renderHtml()}, {@link #renderCss()}, etc.).
+     * TODO(b/138750285): Delete this method in July 2020.
      */
-    @Deprecated
-    Renderer setContentKind(SanitizedContent.ContentKind contentKind);
+     @Deprecated Renderer setContentKind(SanitizedContent.ContentKind contentKind);
 
     /**
      * Renders the configured html template to the given appendable.

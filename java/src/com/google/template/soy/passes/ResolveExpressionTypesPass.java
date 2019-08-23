@@ -24,7 +24,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
-import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.google.template.soy.base.SourceLocation;
 import com.google.template.soy.base.internal.IdGenerator;
 import com.google.template.soy.base.internal.Identifier;
@@ -1143,14 +1142,13 @@ public final class ResolveExpressionTypesPass extends CompilerFilePass {
         for (Identifier id : node.getParamNames()) {
           givenParams.add(id.identifier());
         }
-        for (FieldDescriptor field : protoType.getDescriptor().getFields()) {
-          if (field.isRequired() && !givenParams.contains(field.getName())) {
-            errorReporter.report(
-                node.getSourceLocation(), PROTO_MISSING_REQUIRED_FIELD, field.getName());
+        ImmutableSet<String> fields = protoType.getFieldNames();
+        for (String field : fields) {
+          if (protoType.getFieldDescriptor(field).isRequired() && !givenParams.contains(field)) {
+            errorReporter.report(node.getSourceLocation(), PROTO_MISSING_REQUIRED_FIELD, field);
           }
         }
 
-        ImmutableSet<String> fields = protoType.getFieldNames();
         for (int i = 0; i < node.numChildren(); i++) {
           Identifier fieldName = node.getParamNames().get(i);
           ExprNode expr = node.getChild(i);
@@ -1175,7 +1173,8 @@ public final class ResolveExpressionTypesPass extends CompilerFilePass {
                 expr.getSourceLocation(), PROTO_NULL_ARG_TYPE, fieldName.identifier());
           }
 
-          SoyType fieldType = protoType.getFieldType(fieldName.identifier());
+          SoyType fieldType =
+              protoType.getFieldType(fieldName.identifier(), errorReporter, fieldName.location());
 
           // Let args with unknown or error types pass
           if (argType.equals(UnknownType.getInstance())
@@ -1320,7 +1319,7 @@ public final class ResolveExpressionTypesPass extends CompilerFilePass {
         case PROTO:
           {
             SoyProtoType protoType = (SoyProtoType) baseType;
-            SoyType fieldType = protoType.getFieldType(fieldName);
+            SoyType fieldType = protoType.getFieldType(fieldName, errorReporter, sourceLocation);
             if (fieldType != null) {
               return fieldType;
             } else {
@@ -1553,7 +1552,7 @@ public final class ResolveExpressionTypesPass extends CompilerFilePass {
           }
           break;
         case INDEX:
-          requireLoopVariableInScope(node, node.getChild(0));
+          requireLoopVariableInScope(node, 0);
           node.setType(IntType.getInstance());
           break;
         case IS_PRIMARY_MSG_IN_USE:
@@ -1562,19 +1561,23 @@ public final class ResolveExpressionTypesPass extends CompilerFilePass {
           break;
         case IS_FIRST:
         case IS_LAST:
-          requireLoopVariableInScope(node, node.getChild(0));
+          requireLoopVariableInScope(node, 0);
           node.setType(BoolType.getInstance());
           break;
         case CSS:
-          checkArgIsStringLiteral(node.getChild(node.numChildren() - 1), "css");
+          checkArgIsStringLiteral(node, node.numChildren() - 1, builtinFunction);
           node.setType(StringType.getInstance());
           break;
         case XID:
           // arg validation is already handled by the XidPass
           node.setType(StringType.getInstance());
           break;
+        case UNKNOWN_JS_GLOBAL:
+          checkArgIsStringLiteral(node, 0, builtinFunction);
+          node.setType(UnknownType.getInstance());
+          break;
         case V1_EXPRESSION:
-          checkArgIsStringLiteral(node.getChild(0), "v1Expression");
+          checkArgIsStringLiteral(node, 0, builtinFunction);
           node.setType(UnknownType.getInstance());
           break;
         case DEBUG_SOY_TEMPLATE_INFO:
@@ -1592,9 +1595,15 @@ public final class ResolveExpressionTypesPass extends CompilerFilePass {
     }
 
     /** Private helper that reports an error if the argument is not a string literal. */
-    private void checkArgIsStringLiteral(ExprNode arg, String funcName) {
+    private void checkArgIsStringLiteral(
+        FunctionNode node, int childIndex, BuiltinFunction funcName) {
+      if (childIndex < 0 || childIndex >= node.numChildren()) {
+        return;
+      }
+
+      ExprNode arg = node.getChild(childIndex);
       if (!(arg instanceof StringNode)) {
-        errorReporter.report(arg.getSourceLocation(), STRING_LITERAL_REQUIRED, funcName);
+        errorReporter.report(arg.getSourceLocation(), STRING_LITERAL_REQUIRED, funcName.getName());
       }
     }
 
@@ -1671,7 +1680,12 @@ public final class ResolveExpressionTypesPass extends CompilerFilePass {
     }
 
     /** @param fn The function that must take a loop variable. */
-    private void requireLoopVariableInScope(FunctionNode fn, ExprNode loopVariable) {
+    private void requireLoopVariableInScope(FunctionNode fn, int childIndex) {
+      if (childIndex < 0 || childIndex >= fn.numChildren()) {
+        return;
+      }
+
+      ExprNode loopVariable = fn.getChild(childIndex);
       if (!(loopVariable instanceof VarRefNode
           && ((VarRefNode) loopVariable).getDefnDecl() instanceof LocalVar
           && ((LocalVar) ((VarRefNode) loopVariable).getDefnDecl()).declaringNode()

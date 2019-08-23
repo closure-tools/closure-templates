@@ -21,6 +21,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.template.soy.jbcsrc.shared.Names.rewriteStackTrace;
 
 import com.google.common.base.Ascii;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
 import com.google.common.base.Throwables;
@@ -33,9 +34,11 @@ import com.google.template.soy.data.SanitizedContent;
 import com.google.template.soy.data.SanitizedContent.ContentKind;
 import com.google.template.soy.data.SoyRecord;
 import com.google.template.soy.data.SoyValueConverter;
+import com.google.template.soy.data.SoyValueProvider;
+import com.google.template.soy.data.TemplateParameters;
 import com.google.template.soy.internal.i18n.BidiGlobalDir;
-import com.google.template.soy.jbcsrc.api.SoySauce.WriteContinuation;
 import com.google.template.soy.jbcsrc.shared.CompiledTemplate;
+import com.google.template.soy.jbcsrc.shared.CompiledTemplate.Factory;
 import com.google.template.soy.jbcsrc.shared.CompiledTemplates;
 import com.google.template.soy.jbcsrc.shared.LegacyFunctionAdapter;
 import com.google.template.soy.jbcsrc.shared.RenderContext;
@@ -51,6 +54,7 @@ import com.google.template.soy.shared.restricted.SoyPrintDirective;
 import java.io.IOException;
 import java.util.Map;
 import java.util.function.Predicate;
+import javax.annotation.Nullable;
 
 /** Main entry point for rendering Soy templates on the server. */
 public final class SoySauceImpl implements SoySauce {
@@ -107,12 +111,30 @@ public final class SoySauceImpl implements SoySauce {
   }
 
   @Override
-  public RendererImpl renderTemplate(String template) {
-    CompiledTemplate.Factory factory = templates.getTemplateFactory(template);
-    return new RendererImpl(template, factory, templates.getTemplateContentKind(template));
+  public Boolean hasTemplate(String template) {
+    try {
+      templates.getTemplateFactory(template);
+      return true;
+    } catch (IllegalArgumentException iae) {
+      return false;
+    }
   }
 
-  private final class RendererImpl implements Renderer {
+  @Override
+  public RendererImpl renderTemplate(String template) {
+    CompiledTemplate.Factory factory = templates.getTemplateFactory(template);
+    return new RendererImpl(template, factory, templates.getTemplateContentKind(template), null);
+  }
+
+  @Override
+  public RendererImpl newRenderer(TemplateParameters params) {
+    String template = params.getTemplateName();
+    CompiledTemplate.Factory factory = templates.getTemplateFactory(template);
+    return new RendererImpl(
+        template, factory, templates.getTemplateContentKind(template), params.getParamsAsMap());
+  }
+
+  final class RendererImpl implements Renderer {
     private final String templateName;
     private final CompiledTemplate.Factory templateFactory;
     private final ContentKind contentKind;
@@ -130,12 +152,20 @@ public final class SoySauceImpl implements SoySauce {
     // TODO(b/129547159): Clean up this variable.
     private ContentKind expectedContentKind = ContentKind.HTML;
     private Map<String, Supplier<Object>> perRenderPluginInstances = null;
+    private boolean dataSetInConstructor;
 
     RendererImpl(
-        String templateName, CompiledTemplate.Factory templateFactory, ContentKind contentKind) {
+        String templateName,
+        Factory templateFactory,
+        ContentKind contentKind,
+        @Nullable Map<String, SoyValueProvider> data) {
       this.templateName = templateName;
       this.templateFactory = checkNotNull(templateFactory);
       this.contentKind = contentKind;
+      if (data != null) {
+        setData(data);
+        this.dataSetInConstructor = true;
+      }
     }
 
     @Override
@@ -145,13 +175,17 @@ public final class SoySauceImpl implements SoySauce {
     }
 
     @Override
-    public Renderer setPluginInstances(Map<String, Supplier<Object>> pluginInstances) {
+    public RendererImpl setPluginInstances(Map<String, Supplier<Object>> pluginInstances) {
       this.perRenderPluginInstances = checkNotNull(pluginInstances);
       return this;
     }
 
     @Override
     public RendererImpl setData(Map<String, ?> record) {
+      Preconditions.checkState(
+          !dataSetInConstructor,
+          "May not call setData on a Renderer created from a TemplateParams");
+
       this.data = SoyValueConverter.INSTANCE.newDictFromMap(checkNotNull(record));
       return this;
     }
@@ -187,14 +221,13 @@ public final class SoySauceImpl implements SoySauce {
     }
 
     @Override
-    public Renderer setSoyLogger(SoyLogger logger) {
+    public RendererImpl setSoyLogger(SoyLogger logger) {
       this.logger = checkNotNull(logger);
       this.contextBuilder.hasLogger(true);
       return this;
     }
 
-    @Override
-    @Deprecated
+    @Override @Deprecated
     public Renderer setExpectedContentKind(ContentKind expectedContentKind) {
       checkNotNull(expectedContentKind);
       this.expectedContentKind = expectedContentKind;
