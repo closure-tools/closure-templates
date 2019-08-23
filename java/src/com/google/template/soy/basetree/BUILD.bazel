@@ -13,7 +13,7 @@ java_library(
         "ParentNode.java",
     ],
     visibility = [
-        "//java/src/com/google/template/soy:__pkg__",
+        "//java/src/com/google/template/soy:__subpackages__",
     ],
     deps = [
         "//java/src/com/google/template/soy/base",

@@ -16,11 +16,13 @@
 
 package com.google.template.soy.jbcsrc.api;
 
+import com.google.common.annotations.Beta;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.template.soy.data.SanitizedContent;
 import com.google.template.soy.data.SanitizedContent.ContentKind;
+import com.google.template.soy.data.TemplateParameters;
 import com.google.template.soy.logging.SoyLogger;
 import com.google.template.soy.msgs.SoyMsgBundle;
 import com.google.template.soy.shared.SoyCssRenamingMap;
@@ -38,6 +40,15 @@ public interface SoySauce {
   Renderer renderTemplate(String template);
 
   /**
+   * Returns a new {@link Renderer} for configuring and rendering the given template. The returned
+   * renderer will have its data set and may not allow additional calls to {@link Renderer#setData}.
+   */
+  @Beta
+  default Renderer newRenderer(TemplateParameters params) {
+    return renderTemplate(params.getTemplateName()).setData(params.getParamsAsMap());
+  }
+
+  /**
    * Returns the transitive set of {@code $ij} params needed to render this template.
    *
    * <p>NOTE: this will return a super-set of the parameters that will actually be used at runtime,
@@ -51,6 +62,13 @@ public interface SoySauce {
    */
   ImmutableList<String> getAllRequiredCssNamespaces(
       String templateName, Predicate<String> enabledDelpackages, boolean collectCssFromDelvariants);
+
+  /**
+   * Indicates whether the current {@link SoySauce} instance holds a given template.
+   *
+   * @return `true` if the template is valid and `false` if it is unrecognized.
+   */
+  Boolean hasTemplate(String template);
 
   /** A Renderer can configure rendering parameters and render the template. */
   interface Renderer {
@@ -92,14 +110,15 @@ public interface SoySauce {
     /**
      * Sets the expected content kind.
      *
-     * <p>An attempt to render a template with a different kind will fail if this has been called.
+     * <p>An attempt to render a template with a different kind will fail if this has
+     * been called.
      *
-     * @deprecated Use type-specific render methods instead of setting an expected content kind
-     *     before rendering (e.g. {@link #renderHtml()}, {@link #renderCss()}, etc. will verify the
-     *     content kind at render time).
+     * @deprecated Use type-specific render methods instead of setting an expected
+     *     content kind before rendering (e.g. {@link #renderHtml()},
+     *     {@link #renderCss()}, etc. will verify the content kind at render time).
+     * TODO(b/138750285): Delete this method in July 2020.
      */
-    @Deprecated
-    Renderer setExpectedContentKind(ContentKind kind);
+    @Deprecated Renderer setExpectedContentKind(ContentKind kind);
 
     /** Configures the {@link SoyLogger} to use. */
     Renderer setSoyLogger(SoyLogger logger);

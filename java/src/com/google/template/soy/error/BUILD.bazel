@@ -2,21 +2,14 @@ load("@rules_java//java:defs.bzl", "java_library")
 
 java_library(
     name = "error",
-    srcs = [
-        "ErrorReporter.java",
-        "ErrorReporterImpl.java",
-        "ExplodingErrorReporter.java",
-        "SoyCompilationException.java",
-        "SoyError.java",
-        "SoyErrorKind.java",
-        "SoyErrors.java",
-    ],
+    srcs = glob([
+        "*.java",
+    ]),
     visibility = [
-        "//java/src/com/google/template/soy:__pkg__",
+        "//java/src/com/google/template/soy:__subpackages__",
     ],
     deps = [
         "//java/src/com/google/template/soy/base",
-        "//java/src/com/google/template/soy/base/internal",
         "@com_google_guava//guava",
         "@com_google_auto_value//jar",
         "@com_google_code_findbugs_jsr305//jar",

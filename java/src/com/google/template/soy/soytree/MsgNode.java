@@ -148,6 +148,9 @@ public final class MsgNode extends AbstractBlockCommandNode
   /** The substitution unit info (var name mappings, or null if not yet generated). */
   @Nullable private SubstUnitInfo substUnitInfo = null;
 
+  /** The EscapingMode where this message is used. */
+  @Nullable private EscapingMode escapingMode = null;
+
   public MsgNode(
       int id,
       SourceLocation location,
@@ -248,6 +251,7 @@ public final class MsgNode extends AbstractBlockCommandNode
       this.substUnitInfo = orig.substUnitInfo.copy(oldToNew);
     }
     this.genderExprsString = orig.genderExprsString;
+    this.escapingMode = orig.escapingMode;
   }
 
   @Override
@@ -273,7 +277,7 @@ public final class MsgNode extends AbstractBlockCommandNode
     if (substUnitInfo == null) {
       substUnitInfo = genSubstUnitInfo(this, reporter);
     } else {
-      throw new IllegalStateException("calculateSubstitutionInfo has already been called yet.");
+      throw new IllegalStateException("calculateSubstitutionInfo has already been called.");
     }
   }
 
@@ -282,6 +286,14 @@ public final class MsgNode extends AbstractBlockCommandNode
       throw new IllegalStateException("calculateSubstitutionInfo hasn't been called yet.");
     }
     return substUnitInfo;
+  }
+
+  public EscapingMode getEscapingMode() {
+    return escapingMode;
+  }
+
+  public void setEscapingMode(EscapingMode escapingMode) {
+    this.escapingMode = escapingMode;
   }
 
   @Override
@@ -461,6 +473,7 @@ public final class MsgNode extends AbstractBlockCommandNode
     return genFinalSubstUnitInfoMapsHelper(
         RepresentativeNodes.createFromNode(msgNode, errorReporter));
   }
+
   /**
    * Private helper class for genSubstUnitInfo(). Determines representative nodes and builds
    * preliminary maps.
@@ -496,12 +509,10 @@ public final class MsgNode extends AbstractBlockCommandNode
       while (!traversalQueue.isEmpty()) {
         SoyNode node = traversalQueue.remove();
 
-        if ((node instanceof MsgSelectNode) || (node instanceof MsgPluralNode)) {
-          for (CaseOrDefaultNode child : ((ParentSoyNode<CaseOrDefaultNode>) node).getChildren()) {
-            for (SoyNode grandchild : child.getChildren()) {
-              maybeEnqueue(traversalQueue, grandchild);
-            }
-          }
+        if (node instanceof MsgSelectNode) {
+          maybeEnqueueMsgNode(traversalQueue, (MsgSelectNode) node);
+        } else if (node instanceof MsgPluralNode) {
+          maybeEnqueueMsgNode(traversalQueue, (MsgPluralNode) node);
         } else if (node instanceof VeLogNode) {
           VeLogNode velogNode = (VeLogNode) node;
           for (SoyNode grandchild : velogNode.getChildren()) {
@@ -554,6 +565,15 @@ public final class MsgNode extends AbstractBlockCommandNode
     private static void maybeEnqueue(Deque<SoyNode> traversalQueue, SoyNode child) {
       if (child instanceof MsgSubstUnitNode || child instanceof VeLogNode) {
         traversalQueue.add(child);
+      }
+    }
+
+    private static void maybeEnqueueMsgNode(
+        Deque<SoyNode> traversalQueue, ParentSoyNode<CaseOrDefaultNode> node) {
+      for (CaseOrDefaultNode child : node.getChildren()) {
+        for (SoyNode grandchild : child.getChildren()) {
+          maybeEnqueue(traversalQueue, grandchild);
+        }
       }
     }
 

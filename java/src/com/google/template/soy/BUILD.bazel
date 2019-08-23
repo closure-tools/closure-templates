@@ -11,7 +11,6 @@ javacc_java_library(
     visibility = ["//visibility:public"],
     deps = [
         "//java/src/com/google/template/soy/base",
-        "//java/src/com/google/template/soy/base/internal",
         "//java/src/com/google/template/soy/basetree",
         "//java/src/com/google/template/soy/error",
         "//java/src/com/google/template/soy/internal/base",
@@ -19,6 +18,7 @@ javacc_java_library(
         "//java/src/com/google/template/soy/internal/targetexpr",
         "//java/src/com/google/template/soy/plugin/restricted",
         "//src/main/protobuf:conformance_java_proto",
+        "//src/main/protobuf:css_metadata_java_proto",
         "//src/main/protobuf:logging_config_java_proto",
         "//src/main/protobuf:template_metadata_java_proto",
         "@com_google_guava//guava",

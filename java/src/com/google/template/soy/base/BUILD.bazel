@@ -2,15 +2,15 @@ load("@rules_java//java:defs.bzl", "java_library")
 
 java_library(
     name = "base",
-    srcs = [
-        "SourceLocation.java",
-        "SoyBackendKind.java",
+    srcs = glob([
+        "**/*.java",
+    ]),
+    javacopts = [
+        # TODO(yannic): Remove.
+        "-XepAllErrorsAsWarnings",
     ],
     visibility = [
-        "//java/src/com/google/template/soy:__pkg__",
-        "//java/src/com/google/template/soy/base/internal:__pkg__",
-        "//java/src/com/google/template/soy/basetree:__pkg__",
-        "//java/src/com/google/template/soy/error:__pkg__",
+        "//java/src/com/google/template/soy:__subpackages__",
     ],
     deps = [
         "@com_google_guava//guava",

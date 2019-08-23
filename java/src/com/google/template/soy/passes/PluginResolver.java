@@ -19,6 +19,7 @@ package com.google.template.soy.passes;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
@@ -37,6 +38,7 @@ import com.google.template.soy.shared.restricted.SoyFunction;
 import com.google.template.soy.shared.restricted.SoyFunctionSignature;
 import com.google.template.soy.shared.restricted.SoyPrintDirective;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /** Encapsulates the logic for looking up plugins. */
@@ -81,6 +83,22 @@ public final class PluginResolver {
       SoyErrorKind.of(
           "Plugin class ''{0}'' uses callInstanceMethod for methods on multiple classes {1}. "
               + "SoyJavaSourceFunctions must only use a single class for callInstanceMethod.");
+
+  private static final SoyErrorKind FUNCTION_PRINT_DIRECTIVE_COLLISION =
+      SoyErrorKind.of("Plugin ''{0}'' named ''{1}'' collides with print directive ''{2}''.");
+
+  private static final SoyErrorKind FUNCTION_NOT_CALLABLE =
+      SoyErrorKind.of(
+          "Function ''{0}'' cannot be called as a print directive."
+          );
+
+  /**
+   * Whitelist for function name + print directive name collisions. We will not allow functions with
+   * these names to be callableAsDeprecatedPrintDirective=true.
+   */
+  private static final ImmutableSet<String> COLLISION_WHITELIST =
+      ImmutableSet.<String>builder()
+          .build();
 
   private static final SoySourceFunction ERROR_PLACEHOLDER_FUNCTION = new SoySourceFunction() {};
 
@@ -167,6 +185,21 @@ public final class PluginResolver {
         }
       }
     }
+
+    for (String pdName : soyPrintDirectives.keySet()) {
+      String functionName = getFunctionNameEquivalentToPrintDirectiveName(pdName);
+      if (COLLISION_WHITELIST.contains(functionName)) {
+        continue;
+      }
+      if (functions.containsKey(functionName)) {
+        reporter.report(
+            SourceLocation.UNKNOWN,
+            FUNCTION_PRINT_DIRECTIVE_COLLISION,
+            functions.get(functionName).getClass().getName(),
+            functionName,
+            soyPrintDirectives.get(pdName).getClass().getName());
+      }
+    }
   }
 
   /**
@@ -187,6 +220,34 @@ public final class PluginResolver {
   }
 
   /**
+   * Returns a function equivalent to the print directive named {@code directiveName}, only if no
+   * print directive of that name exists and several other conditions are met.
+   */
+  Optional<SoySourceFunction> getFunctionCallableAsPrintDirective(
+      String directiveName, SourceLocation sourceLocation) {
+    if (printDirectives.containsKey(directiveName)) {
+      return Optional.empty();
+    }
+    String functionName = getFunctionNameEquivalentToPrintDirectiveName(directiveName);
+    if (COLLISION_WHITELIST.contains(functionName)) {
+      return Optional.empty();
+    }
+    Object function = functions.get(functionName);
+    if (function == null) {
+      return Optional.empty();
+    }
+    if (function instanceof SoySourceFunction) {
+      SoyFunctionSignature signature =
+          function.getClass().getAnnotation(SoyFunctionSignature.class);
+      if (signature.callableAsDeprecatedPrintDirective()) {
+        return Optional.of((SoySourceFunction) function);
+      }
+    }
+    reporter.report(sourceLocation, FUNCTION_NOT_CALLABLE, functionName);
+    return Optional.empty();
+  }
+
+  /**
    * Returns a function with the given name and arity.
    *
    * <p>An error will be reported according to the current {@link Mode} and a placeholder function
@@ -198,14 +259,7 @@ public final class PluginResolver {
       reportMissing(location, "function", name, functions.keySet());
       return ERROR_PLACEHOLDER_FUNCTION;
     }
-    Set<Integer> validArgsSize;
-    if (soyFunction instanceof SoyFunction) {
-      validArgsSize = ((SoyFunction) soyFunction).getValidArgsSizes();
-    } else {
-      validArgsSize =
-          getValidArgsSizes(
-              soyFunction.getClass().getAnnotation(SoyFunctionSignature.class).value());
-    }
+    Set<Integer> validArgsSize = getValidArgsSizes(soyFunction);
     checkNumArgs("function", validArgsSize, numArgs, location);
     warnIfDeprecated(name, soyFunction, location);
     return soyFunction;
@@ -224,6 +278,17 @@ public final class PluginResolver {
       case ALLOW_UNDEFINED:
         // do nothing :(
         break;
+    }
+  }
+
+  private static Set<Integer> getValidArgsSizes(Object soyFunction) {
+    if (soyFunction instanceof SoyFunction) {
+      return ((SoyFunction) soyFunction).getValidArgsSizes();
+    } else {
+      SoyFunctionSignature signature =
+          soyFunction.getClass().getAnnotation(SoyFunctionSignature.class);
+      Preconditions.checkArgument(signature != null);
+      return getValidArgsSizes(signature.value());
     }
   }
 
@@ -263,5 +328,11 @@ public final class PluginResolver {
         return validArgSizes;
       }
     };
+  }
+
+  /** Converts a | prepended print directive name to an equivalent function name. */
+  static String getFunctionNameEquivalentToPrintDirectiveName(String printDirectiveName) {
+    Preconditions.checkArgument(printDirectiveName.startsWith("|"));
+    return printDirectiveName.substring(1);
   }
 }

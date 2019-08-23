@@ -6,7 +6,7 @@ java_library(
         "UnescapeUtils.java",
     ],
     visibility = [
-        "//java/src/com/google/template/soy:__pkg__",
+        "//java/src/com/google/template/soy:__subpackages__",
     ],
     deps = [
         "@com_google_guava//guava",

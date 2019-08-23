@@ -16,6 +16,8 @@
 
 package com.google.template.soy.i18ndirectives;
 
+import com.google.template.soy.data.SoyValue;
+import com.google.template.soy.data.restricted.NumberData;
 import com.ibm.icu.text.CompactDecimalFormat;
 import com.ibm.icu.text.CompactDecimalFormat.CompactStyle;
 import com.ibm.icu.text.NumberFormat;
@@ -27,11 +29,33 @@ public final class I18NDirectivesRuntime {
 
   private I18NDirectivesRuntime() {}
 
+  public static String formatNum(
+      ULocale uLocale,
+      @Nullable SoyValue number,
+      String formatType,
+      String numbersKeyword,
+      @Nullable NumberData minFractionDigits,
+      @Nullable NumberData maxFractionDigits) {
+    if (number == null) {
+      return "";
+    } else if (number instanceof NumberData) {
+      return formatInternal(
+          uLocale,
+          ((NumberData) number).toFloat(),
+          formatType,
+          numbersKeyword,
+          minFractionDigits != null ? (int) minFractionDigits.numberValue() : null,
+          maxFractionDigits != null ? (int) maxFractionDigits.numberValue() : null);
+    } else {
+      return "NaN";
+    }
+  }
+
   /**
    * Formats a number using ICU4J. Note: If min or max fraction digits is null, the param will be
    * ignored.
    */
-  public static String formatNum(
+  private static String formatInternal(
       ULocale uLocale,
       double number,
       String formatType,
@@ -54,21 +78,11 @@ public final class I18NDirectivesRuntime {
         numberFormat = NumberFormat.getScientificInstance(uLocale);
         break;
       case "compact_short":
-        {
-          CompactDecimalFormat compactNumberFormat =
-              CompactDecimalFormat.getInstance(uLocale, CompactStyle.SHORT);
-          compactNumberFormat.setMaximumSignificantDigits(3);
-          numberFormat = compactNumberFormat;
-          break;
-        }
+        numberFormat = CompactDecimalFormat.getInstance(uLocale, CompactStyle.SHORT);
+        break;
       case "compact_long":
-        {
-          CompactDecimalFormat compactNumberFormat =
-              CompactDecimalFormat.getInstance(uLocale, CompactStyle.LONG);
-          compactNumberFormat.setMaximumSignificantDigits(3);
-          numberFormat = compactNumberFormat;
-          break;
-        }
+        numberFormat = CompactDecimalFormat.getInstance(uLocale, CompactStyle.LONG);
+        break;
       default:
         throw new IllegalArgumentException(
             "First argument to formatNum must be "
@@ -76,15 +90,18 @@ public final class I18NDirectivesRuntime {
                 + "'compact_short', or 'compact_long'.");
     }
 
-    if (minFractionDigits != null) {
-      numberFormat.setMinimumFractionDigits(minFractionDigits);
-    }
-    if (maxFractionDigits == null) {
-      maxFractionDigits = minFractionDigits;
-    }
-    if (maxFractionDigits != null) {
+    if (minFractionDigits != null || maxFractionDigits != null) {
+      if (maxFractionDigits == null) {
+        maxFractionDigits = minFractionDigits;
+      }
+      if (minFractionDigits != null) {
+        numberFormat.setMinimumFractionDigits(minFractionDigits);
+      }
       numberFormat.setMaximumFractionDigits(maxFractionDigits);
+    } else if (numberFormat instanceof CompactDecimalFormat) {
+      ((CompactDecimalFormat) numberFormat).setMaximumSignificantDigits(3);
     }
+
     return numberFormat.format(number);
   }
 }

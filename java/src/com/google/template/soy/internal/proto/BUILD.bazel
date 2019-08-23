@@ -2,17 +2,15 @@ load("@rules_java//java:defs.bzl", "java_library")
 
 java_library(
     name = "proto",
-    srcs = [
-        "Field.java",
-        "FieldVisitor.java",
-        "JavaQualifiedNames.java",
-        "ProtoFlavor.java",
-        "ProtoUtils.java",
-    ],
+    srcs = glob([
+        "*.java",
+    ]),
     visibility = [
-        "//java/src/com/google/template/soy:__pkg__",
+        "//java/src/com/google/template/soy:__subpackages__",
     ],
     deps = [
+        "//java/src/com/google/template/soy/base",
+        "//java/src/com/google/template/soy/error",
         "@com_google_guava//guava",
         "@args4j//jar",
         "@com_google_auto_value//jar",

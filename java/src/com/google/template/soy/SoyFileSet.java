@@ -39,6 +39,7 @@ import com.google.template.soy.error.ErrorReporter;
 import com.google.template.soy.error.SoyCompilationException;
 import com.google.template.soy.error.SoyError;
 import com.google.template.soy.error.SoyErrors;
+import com.google.template.soy.error.SoyInternalCompilerException;
 import com.google.template.soy.incrementaldomsrc.IncrementalDomSrcMain;
 import com.google.template.soy.incrementaldomsrc.SoyIncrementalDomSrcOptions;
 import com.google.template.soy.jbcsrc.BytecodeCompiler;
@@ -59,8 +60,8 @@ import com.google.template.soy.passes.ClearSoyDocStringsVisitor;
 import com.google.template.soy.passes.PassManager;
 import com.google.template.soy.passes.PassManager.PassContinuationRule;
 import com.google.template.soy.passes.PluginResolver;
-import com.google.template.soy.passes.ResolveExpressionTypesPass;
 import com.google.template.soy.passes.SoyConformancePass;
+import com.google.template.soy.passes.SoyElementPass;
 import com.google.template.soy.plugin.restricted.SoySourceFunction;
 import com.google.template.soy.pysrc.SoyPySrcOptions;
 import com.google.template.soy.pysrc.internal.PySrcMain;
@@ -69,6 +70,7 @@ import com.google.template.soy.shared.SoyGeneralOptions;
 import com.google.template.soy.shared.internal.InternalPlugins;
 import com.google.template.soy.shared.internal.SoyScopedData;
 import com.google.template.soy.shared.internal.SoySimpleScope;
+import com.google.template.soy.shared.internal.gencode.GeneratedFile;
 import com.google.template.soy.shared.restricted.SoyFunction;
 import com.google.template.soy.shared.restricted.SoyPrintDirective;
 import com.google.template.soy.soytree.CompilationUnit;
@@ -265,7 +267,6 @@ public final class SoyFileSet {
       extraSoyPrintDirectives.addAll(function);
       return this;
     }
-
 
     /**
      * Adds an input Soy file, given a {@code CharSource} for the file content, as well as the
@@ -602,6 +603,36 @@ public final class SoyFileSet {
     return typeRegistry;
   }
 
+  /** Template pattern for any public or package visible entry point method that returns a value. */
+  private <T> T entryPoint(Supplier<T> variant) {
+    resetErrorReporter();
+    T rv;
+    try {
+      rv = variant.get();
+    } catch (SoyCompilationException | SoyInternalCompilerException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      if (errorReporter.hasErrors()) {
+        throw new SoyInternalCompilerException(
+            Iterables.concat(errorReporter.getErrors(), errorReporter.getWarnings()), e);
+      } else {
+        throw e;
+      }
+    }
+    throwIfErrorsPresent();
+    reportWarnings();
+    return rv;
+  }
+
+  /** Template pattern for any public or package visible entry point method that is void. */
+  private void entryPointVoid(Runnable variant) {
+    entryPoint(
+        () -> {
+          variant.run();
+          return null;
+        });
+  }
+
   /**
    * Generates Java classes containing parse info (param names, template names, meta info). There
    * will be one Java class per Soy file.
@@ -609,61 +640,60 @@ public final class SoyFileSet {
    * @param javaPackage The Java package for the generated classes.
    * @param javaClassNameSource Source of the generated class names. Must be one of "filename",
    *     "namespace", or "generic".
-   * @return A map from generated file name (of the form "<*>SoyInfo.java") to generated file
-   *     content.
+   * @return A list of generated files to write (of the form "<*>SoyInfo.java").
    * @throws SoyCompilationException If compilation fails.
    */
-  ImmutableMap<String, String> generateParseInfo(String javaPackage, String javaClassNameSource) {
-    resetErrorReporter();
-    // TODO(lukes): see if we can enforce that globals are provided at compile time here. given that
-    // types have to be, this should be possible.  Currently it is disabled for backwards
-    // compatibility
-    // N.B. we do not run the optimizer here for 2 reasons:
-    // 1. it would just waste time, since we are not running code generation the optimization work
-    //    doesn't help anything
-    // 2. it potentially removes metadata from the tree by precalculating expressions. For example,
-    //    trivial print nodes are evaluated, which can remove globals from the tree, but the
-    ParseResult result =
-        parse(
-            passManagerBuilder()
-                .allowUnknownGlobals()
-                .optimize(false)
-                // Don't desugar, this is a bit of a waste of time and it destroys type information
-                // about @state parameters
-                .desugarHtmlAndStateNodes(false));
-    throwIfErrorsPresent();
+  ImmutableList<GeneratedFile> generateParseInfo(String javaPackage, String javaClassNameSource) {
+    return entryPoint(
+        () -> {
+          // TODO(lukes): see if we can enforce that globals are provided at compile time here.
+          // given that types have to be, this should be possible.  Currently it is disabled for
+          // backwards compatibility
+          // N.B. we do not run the optimizer here for 2 reasons:
+          // 1. it would just waste time, since we are not running code generation the optimization
+          //    work doesn't help anything
+          // 2. it potentially removes metadata from the tree by precalculating expressions. For
+          //     example, trivial print nodes are evaluated, which can remove globals from the tree,
+          //     but the
+          ParseResult result =
+              parse(
+                  passManagerBuilder()
+                      .allowUnknownGlobals()
+                      .optimize(false)
+                      // Don't desugar, this is a bit of a waste of time and it destroys type
+                      // information about @state parameters
+                      .desugarHtmlAndStateNodes(false));
+          throwIfErrorsPresent();
 
-    SoyFileSetNode soyTree = result.fileSet();
-    TemplateRegistry registry = result.registry();
+          SoyFileSetNode soyTree = result.fileSet();
+          TemplateRegistry registry = result.registry();
 
-    // Do renaming of package-relative class names.
-    ImmutableMap<String, String> parseInfo =
-        new GenerateParseInfoVisitor(javaPackage, javaClassNameSource, registry, typeRegistry)
-            .exec(soyTree);
-    throwIfErrorsPresent();
-    reportWarnings();
-    return parseInfo;
+          // Do renaming of package-relative class names.
+          return new GenerateParseInfoVisitor(
+                  javaPackage, javaClassNameSource, registry, typeRegistry)
+              .exec(soyTree);
+        });
   }
 
   /** A simple tool to enforce conformance and only conformance. */
   void checkConformance() {
-    resetErrorReporter();
-    // to check conformance we only need to run as much as it takes to execute the SoyConformance
-    // pass.
-    parse(
-        passManagerBuilder()
-            // We have to set disableAllTypeChecking to make sure default parameter types don't
-            // break calculating TemplateMetadata objects.  This is because SoyConformancePass runs
-            // before ResolveExpressionTypesPass which normally populates the parameter types for
-            // default params.  With disableAllTypeChecking set an earlier pass will just set those
-            // types to unknown
-            // TODO(lukes):  change the pass continuation mechanism to avoid generating a template
-            // registry if we halt prior to cross template passes.
-            .disableAllTypeChecking()
-            .addPassContinuationRule(
-                SoyConformancePass.class, PassContinuationRule.STOP_AFTER_PASS));
-    throwIfErrorsPresent();
-    reportWarnings();
+    entryPointVoid(
+        () -> {
+          // to check conformance we only need to run as much as it takes to execute the
+          // SoyConformance pass.
+          parse(
+              passManagerBuilder()
+                  // We have to set disableAllTypeChecking to make sure default parameter types
+                  // don't break calculating TemplateMetadata objects.  This is because
+                  // SoyConformancePass runs before ResolveExpressionTypesPass which normally
+                  // populates the parameter types for default params.  With disableAllTypeChecking
+                  // set an earlier pass will just set those types to unknown
+                  // TODO(lukes):  change the pass continuation mechanism to avoid generating a
+                  // template registry if we halt prior to cross template passes.
+                  .disableAllTypeChecking()
+                  .addPassContinuationRule(
+                      SoyConformancePass.class, PassContinuationRule.STOP_AFTER_PASS));
+        });
   }
 
   /**
@@ -674,10 +704,7 @@ public final class SoyFileSet {
    * @throws SoyCompilationException If compilation fails.
    */
   public SoyMsgBundle extractMsgs() {
-    resetErrorReporter();
-    SoyMsgBundle bundle = doExtractMsgs();
-    reportWarnings();
-    return bundle;
+    return entryPoint(this::doExtractMsgs);
   }
 
   /**
@@ -691,11 +718,15 @@ public final class SoyFileSet {
   public void extractAndWriteMsgs(
       SoyMsgBundleHandler msgBundleHandler, OutputFileOptions options, ByteSink output)
       throws IOException {
-    resetErrorReporter();
-    SoyMsgBundle bundle = doExtractMsgs();
-    msgBundleHandler.writeExtractedMsgs(bundle, options, output, errorReporter);
-    throwIfErrorsPresent();
-    reportWarnings();
+    entryPointVoid(
+        () -> {
+          SoyMsgBundle bundle = doExtractMsgs();
+          try {
+            msgBundleHandler.writeExtractedMsgs(bundle, options, output, errorReporter);
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          }
+        });
   }
 
   /** Performs the parsing and extraction logic. */
@@ -707,6 +738,7 @@ public final class SoyFileSet {
                 passManagerBuilder()
                     .allowUnknownGlobals()
                     .allowV1Expression()
+                    .allowUnknownJsGlobals()
                     .desugarHtmlAndStateNodes(false)
                     .setTypeRegistry(SoyTypeRegistry.DEFAULT_UNKNOWN)
                     // TODO(lukes): consider changing this to pass a null resolver instead of the
@@ -747,22 +779,18 @@ public final class SoyFileSet {
    * @throws SoyCompilationException If compilation fails.
    */
   public SoyTofu compileToTofu(Map<String, Supplier<Object>> pluginInstances) {
-    resetErrorReporter();
-    ServerCompilationPrimitives primitives = compileForServerRendering();
-    throwIfErrorsPresent();
-    SoyTofu tofu = doCompileToTofu(primitives, pluginInstances);
-
-    reportWarnings();
-    return tofu;
+    return entryPoint(
+        () -> {
+          ServerCompilationPrimitives primitives = compileForServerRendering();
+          throwIfErrorsPresent();
+          return doCompileToTofu(primitives, pluginInstances);
+        });
   }
 
   /** Helper method to compile SoyTofu from {@link ServerCompilationPrimitives} */
   private SoyTofu doCompileToTofu(
       ServerCompilationPrimitives primitives, Map<String, Supplier<Object>> pluginInstances) {
-    return new BaseTofu(
-        scopedData.enterable(),
-        primitives.soyTree,
-        pluginInstances);
+    return new BaseTofu(scopedData.enterable(), primitives.soyTree, pluginInstances);
   }
 
   /**
@@ -795,14 +823,12 @@ public final class SoyFileSet {
    * @throws SoyCompilationException If compilation fails.
    */
   public SoySauce compileTemplates(Map<String, Supplier<Object>> pluginInstances) {
-    resetErrorReporter();
-    disallowExternalCalls();
-    ServerCompilationPrimitives primitives = compileForServerRendering();
-    throwIfErrorsPresent();
-    SoySauce sauce = doCompileSoySauce(primitives, pluginInstances);
-
-    reportWarnings();
-    return sauce;
+    return entryPoint(
+        () -> {
+          ServerCompilationPrimitives primitives = compileForServerRendering();
+          throwIfErrorsPresent();
+          return doCompileSoySauce(primitives, pluginInstances);
+        });
   }
 
   /**
@@ -811,17 +837,22 @@ public final class SoyFileSet {
    *
    * @throws SoyCompilationException If compilation fails.
    */
-  void compileToJar(ByteSink jarTarget, Optional<ByteSink> srcJarTarget) throws IOException {
-    resetErrorReporter();
-    disallowExternalCalls();
-    ServerCompilationPrimitives primitives = compileForServerRendering();
-    BytecodeCompiler.compileToJar(
-        primitives.registry, primitives.soyTree, errorReporter, typeRegistry, jarTarget);
-    if (srcJarTarget.isPresent()) {
-      BytecodeCompiler.writeSrcJar(primitives.soyTree, soyFileSuppliers, srcJarTarget.get());
-    }
-    throwIfErrorsPresent();
-    reportWarnings();
+  void compileToJar(ByteSink jarTarget, Optional<ByteSink> srcJarTarget) {
+    entryPointVoid(
+        () -> {
+          disallowExternalCalls();
+          ServerCompilationPrimitives primitives = compileForServerRendering();
+          try {
+            BytecodeCompiler.compileToJar(
+                primitives.registry, primitives.soyTree, errorReporter, typeRegistry, jarTarget);
+            if (srcJarTarget.isPresent()) {
+              BytecodeCompiler.writeSrcJar(
+                  primitives.soyTree, soyFileSuppliers, srcJarTarget.get());
+            }
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          }
+        });
   }
 
   /** Helper method to compile SoySauce from {@link ServerCompilationPrimitives} */
@@ -893,37 +924,42 @@ public final class SoyFileSet {
    * Compiles this Soy file set into JS source code files and returns these JS files as a list of
    * strings, one per file.
    *
-   * <p>TODO(lukes): deprecate and delete localized builds
-   *
    * @param jsSrcOptions The compilation options for the JS Src output target.
    * @param msgBundle The bundle of translated messages, or null to use the messages from the Soy
    *     source.
    * @return A list of strings where each string represents the JS source code that belongs in one
    *     JS file. The generated JS files correspond one-to-one to the original Soy source files.
    * @throws SoyCompilationException If compilation fails.
+   * @deprecated Do not call. Use the command line API.
    */
   @SuppressWarnings("deprecation")
+  @Deprecated
   public List<String> compileToJsSrc(
       SoyJsSrcOptions jsSrcOptions, @Nullable SoyMsgBundle msgBundle) {
-    resetErrorReporter();
-    // JS has traditionally allowed unknown globals, as a way for soy to reference normal js enums
-    // and constants. For consistency/reusability of templates it would be nice to not allow that
-    // but the cat is out of the bag.
-    PassManager.Builder builder =
-        passManagerBuilder()
-            .allowUnknownGlobals()
-            .allowV1Expression()
-            .desugarHtmlAndStateNodes(false);
-    ParseResult result = parse(builder);
-    throwIfErrorsPresent();
-    TemplateRegistry registry = result.registry();
-    SoyFileSetNode fileSet = result.fileSet();
-    List<String> generatedSrcs =
-        new JsSrcMain(scopedData.enterable(), typeRegistry)
-            .genJsSrc(fileSet, registry, jsSrcOptions, msgBundle, errorReporter);
-    throwIfErrorsPresent();
-    reportWarnings();
-    return generatedSrcs;
+    return compileToJsSrcInternal(jsSrcOptions, msgBundle);
+  }
+
+  List<String> compileToJsSrcInternal(
+      SoyJsSrcOptions jsSrcOptions, @Nullable SoyMsgBundle msgBundle) {
+    return entryPoint(
+        () -> {
+          // JS has traditionally allowed unknown globals, as a way for soy to reference normal js
+          // enums and constants. For consistency/reusability of templates it would be nice to not
+          // allow that but the cat is out of the bag.
+          PassManager.Builder builder =
+              passManagerBuilder()
+                  // TODO(lukes): remove this in favor of allowUnknownJsGlobals
+                  .allowUnknownGlobals()
+                  .allowV1Expression()
+                  .allowUnknownJsGlobals()
+                  .desugarHtmlAndStateNodes(false);
+          ParseResult result = parse(builder);
+          throwIfErrorsPresent();
+          TemplateRegistry registry = result.registry();
+          SoyFileSetNode fileSet = result.fileSet();
+          return new JsSrcMain(scopedData.enterable(), typeRegistry)
+              .genJsSrc(fileSet, registry, jsSrcOptions, msgBundle, errorReporter);
+        });
   }
 
   /**
@@ -934,18 +970,23 @@ public final class SoyFileSet {
    * @return A list of strings where each string represents the JS source code that belongs in one
    *     JS file. The generated JS files correspond one-to-one to the original Soy source files.
    * @throws SoyCompilationException If compilation fails.
+   * @deprecated Do not call. Use the command line API.
    */
+  @Deprecated
   public List<String> compileToIncrementalDomSrc(SoyIncrementalDomSrcOptions jsSrcOptions) {
-    resetErrorReporter();
-    // For incremental dom backend, we don't desugar HTML nodes since it requires HTML context.
-    ParseResult result = parse(passManagerBuilder().desugarHtmlAndStateNodes(false));
-    throwIfErrorsPresent();
-    List<String> generatedSrcs =
-        new IncrementalDomSrcMain(scopedData.enterable(), typeRegistry)
-            .genJsSrc(result.fileSet(), result.registry(), jsSrcOptions, errorReporter);
-    throwIfErrorsPresent();
-    reportWarnings();
-    return generatedSrcs;
+    return compileToIncrementalDomSrcInternal(jsSrcOptions);
+  }
+
+  List<String> compileToIncrementalDomSrcInternal(SoyIncrementalDomSrcOptions jsSrcOptions) {
+    return entryPoint(
+        () -> {
+          // For incremental dom backend, we don't desugar HTML nodes since it requires HTML
+          // context.
+          ParseResult result = parse(passManagerBuilder().desugarHtmlAndStateNodes(false));
+          throwIfErrorsPresent();
+          return new IncrementalDomSrcMain(scopedData.enterable(), typeRegistry)
+              .genJsSrc(result.fileSet(), result.registry(), jsSrcOptions, errorReporter);
+        });
   }
 
   /**
@@ -955,19 +996,21 @@ public final class SoyFileSet {
    *     corresponding to an input file path.
    * @param pySrcOptions The compilation options for the Python Src output target.
    * @throws SoyCompilationException If compilation fails.
-   * @throws IOException If there is an error in opening/reading a message file or opening/writing
-   *     an output JS file.
+   * @throws RuntimeException If there is an error in opening/reading a message file or
+   *     opening/writing an output JS file.
    */
-  void compileToPySrcFiles(String outputPathFormat, SoyPySrcOptions pySrcOptions)
-      throws IOException {
-    resetErrorReporter();
-    ParseResult result = parse();
-    throwIfErrorsPresent();
-    new PySrcMain(scopedData.enterable())
-        .genPyFiles(result.fileSet(), pySrcOptions, outputPathFormat, errorReporter);
-
-    throwIfErrorsPresent();
-    reportWarnings();
+  void compileToPySrcFiles(String outputPathFormat, SoyPySrcOptions pySrcOptions) {
+    entryPointVoid(
+        () -> {
+          try {
+            ParseResult result = parse();
+            throwIfErrorsPresent();
+            new PySrcMain(scopedData.enterable())
+                .genPyFiles(result.fileSet(), pySrcOptions, outputPathFormat, errorReporter);
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          }
+        });
   }
 
   /**
@@ -975,20 +1018,21 @@ public final class SoyFileSet {
    * compilation.
    */
   ParseResult compileMinimallyForHeaders() {
-    resetErrorReporter();
-    ParseResult result =
-        parse(
-            passManagerBuilder()
-                // ResolveExpressionTypesPass resolve types (specifically on default parameter
-                // values) which is necessary for template metadatas
-                .addPassContinuationRule(
-                    ResolveExpressionTypesPass.class, PassContinuationRule.STOP_AFTER_PASS)
-                .allowV1Expression(),
-            typeRegistry);
-
-    throwIfErrorsPresent();
-    reportWarnings();
-    return result;
+    return entryPoint(
+        () ->
+            parse(
+                passManagerBuilder()
+                    // Because we allow this for JS generated templates, we allow this for
+                    // headers.
+                    // TODO(lukes): remove this in favor of allowUnknownJsGlobals
+                    .allowUnknownGlobals()
+                    .allowUnknownJsGlobals()
+                    // SoyElement pass adds additional information to TemplateNodes for
+                    // serialization into headers.
+                    .addPassContinuationRule(
+                        SoyElementPass.class, PassContinuationRule.STOP_AFTER_PASS)
+                    .allowV1Expression(),
+                typeRegistry));
   }
 
   ImmutableMap<String, SoyFunction> getSoyFunctions() {

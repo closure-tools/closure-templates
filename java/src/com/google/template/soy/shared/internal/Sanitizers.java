@@ -38,7 +38,6 @@ import com.google.template.soy.data.UnsafeSanitizedContentOrdainer;
 import com.google.template.soy.data.restricted.BooleanData;
 import com.google.template.soy.data.restricted.NullData;
 import com.google.template.soy.data.restricted.NumberData;
-import com.google.template.soy.data.restricted.StringData;
 import com.google.template.soy.shared.internal.TagWhitelist.OptionalSafeTag;
 import java.io.Closeable;
 import java.io.IOException;
@@ -619,31 +618,6 @@ public final class Sanitizers {
   }
 
   /**
-   * For any resource string/variable which has |blessStringAsTrustedResuorceUrlForLegacy directive
-   * return the input value as is.
-   */
-  public static SoyValue blessStringAsTrustedResourceUrlForLegacy(SoyValue value) {
-    return value;
-  }
-
-  /**
-   * For any resource string/variable which has |blessStringAsTrustedResuorceUrlForLegacy directive
-   * return the input value as is after converting it into SoyValue.
-   */
-  public static SoyValue blessStringAsTrustedResourceUrlForLegacy(String value) {
-    return StringData.forValue(value);
-  }
-
-  /**
-   * For any resource string/variable which has |blessStringAsTrustedResuorceUrlForLegacy directive
-   * apply a no-op escaping directive
-   */
-  public static LoggingAdvisingAppendable blessStringAsTrustedResourceUrlForLegacyStreaming(
-      LoggingAdvisingAppendable appendable) {
-    return appendable;
-  }
-
-  /**
    * Makes sure that the given input is a data URI corresponding to an image.
    *
    * <p>SanitizedContent kind does not apply -- the directive is also used to ensure no foreign
@@ -827,7 +801,7 @@ public final class Sanitizers {
     public LoggingAdvisingAppendable appendLoggingFunctionInvocation(
         LoggingFunctionInvocation funCall, ImmutableList<Function<String, String>> escapers)
         throws IOException {
-      if (getSantizedContentKind() == ContentKind.ATTRIBUTES) {
+      if (getSanitizedContentKind() == ContentKind.ATTRIBUTES) {
         delegate.appendLoggingFunctionInvocation(funCall, escapers);
         // Reset lastChar to a dummy character so that we add a space after.
         lastChar = 'a';
@@ -848,7 +822,7 @@ public final class Sanitizers {
 
     @Override
     public void close() throws IOException {
-      if (getSantizedContentKind() == ContentKind.ATTRIBUTES) {
+      if (getSanitizedContentKind() == ContentKind.ATTRIBUTES) {
         if (lastChar != 0 && shouldAppendSpace(lastChar)) {
           delegate.append(' ');
         }
